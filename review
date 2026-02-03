@@ -5,6 +5,12 @@ set -e
 REPOS=(
   "Dimensiondev/firefly-social"
   "Dimensiondev/firefly-wallet"
+  "Dimensiondev/firefly-chatbot"
+  "Dimensiondev/firefly-sitemap"
+  "Dimensiondev/firefly-workers"
+  "Dimensiondev/firefly-about"
+  "Dimensiondev/firefly-exception-tracker"
+  "Dimensiondev/firefly-bb8-bot"
 )
 
 # ----- fzf (ESC must NOT kill script) -----
