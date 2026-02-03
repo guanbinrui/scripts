@@ -11,6 +11,7 @@ REPOS=(
   "Dimensiondev/firefly-about"
   "Dimensiondev/firefly-exception-tracker"
   "Dimensiondev/firefly-bb8-bot"
+  "Dimensiondev/firefly-prophet"
 )
 
 # ----- fzf (ESC must NOT kill script) -----
@@ -44,19 +45,29 @@ while true; do
     break
   fi
 
-  PR_LIST=$(echo "$ALL_PRS" | jq -rs '
+  # ANSI colors: green, red, gray, reset (for --ansi fzf)
+  G=$'\e[32m'
+  R=$'\e[31m'
+  X=$'\e[90m'
+  Z=$'\e[0m'
+
+  PR_LIST=$(echo "$ALL_PRS" | jq -rs --arg G "$G" --arg R "$R" --arg X "$X" --arg Z "$Z" '
     sort_by(.createdAt) | reverse | .[] |
     "\(.repo)\t#\(.number)\t" +
-    (if .isDraft then "DRAFT " else "READY " end) + "\t" +
+    (if .isDraft then $X + "DRAFT" + $Z + " " else $G + "READY" + $Z + " " end) + "\t" +
     (if .reviewDecision == "APPROVED" then "✔️  "
      elif .reviewDecision == "CHANGES_REQUESTED" then "❌  "
      else "⏳  " end) + "\t" +
-    (if .mergeable == "MERGEABLE" then "MERGEABLE"
-     elif .mergeable == "CONFLICTING" then "CONFLICT "
-     else "UNKNOWN  " end) + "\t@" +
+    (if .mergeable == "MERGEABLE" then $G + "MERGEABLE" + $Z
+     elif .mergeable == "CONFLICTING" then $R + "CONFLICT" + $Z + " "
+     else $X + "UNKNOWN" + $Z + "  " end) + "\t@" +
     .author.login + "\t" +
     .title
   ')
+
+  # Append operation items so fzf starts with first PR selected
+  REFRESH_LINE=$'⟳ Refresh'
+  PR_LIST=$(printf '%s\n%s' "$REFRESH_LINE" "$PR_LIST")
 
   echo
   echo "Select PRs to review (across all repos)"
@@ -76,8 +87,28 @@ while true; do
     break
   fi
 
+  # Handle operation items: refresh
+  do_refresh=0
+  PR_LINES=""
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    if [[ "$line" == "$REFRESH_LINE" ]]; then
+      do_refresh=1
+    else
+      PR_LINES+="$line"$'\n'
+    fi
+  done <<< "$SELECTED"
+
+  if (( do_refresh )); then
+    continue
+  fi
+  if [[ -z "$PR_LINES" ]]; then
+    continue
+  fi
+
   # Process selected PRs: show decision menu first, then act (one PR then back to menu)
   while IFS=$'\t' read -r repo pr status review merge author title; do
+    [[ -z "$repo" ]] && continue
     pr_number="${pr#\#}"
 
     echo
@@ -134,7 +165,7 @@ while true; do
         echo "Invalid choice, skipped"
         ;;
     esac
-  done <<< "$SELECTED"
+  done <<< "$PR_LINES"
 
   # After processing (any action or Back), return to selection menu
   continue
