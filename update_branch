@@ -1,0 +1,14 @@
+#!/bin/bash
+
+BRANCH=$1
+
+if [ -z "${BRANCH}" ]; then
+    BRANCH="$(git branch --show-current)"
+fi
+
+echo "updating branch: $BRANCH"
+
+git fetch
+git co origin/$BRANCH
+git b -f $BRANCH
+git co $BRANCH

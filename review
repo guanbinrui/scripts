@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+
+set -e
+
+REPOS=(
+  "Dimensiondev/firefly-social"
+  "Dimensiondev/firefly-wallet"
+)
+
+# ----- fzf (ESC must NOT kill script) -----
+trap '' INT
+set +e
+
+while true; do
+  echo
+  echo "Fetching PRs from all repositories..."
+  echo
+
+  ALL_PRS=""
+  for repo in "${REPOS[@]}"; do
+    PRS=$(gh pr list \
+      --repo "$repo" \
+      --state open \
+      --limit 200 \
+      --json number,title,author,isDraft,reviewDecision,mergeable,createdAt)
+
+    [[ "$PRS" == "[]" ]] && continue
+
+    PRS_WITH_REPO=$(echo "$PRS" | jq --arg repo "$repo" '
+      .[] | . + { repo: $repo }
+    ')
+
+    ALL_PRS+="$PRS_WITH_REPO"$'\n'
+  done
+
+  if [[ -z "$ALL_PRS" ]]; then
+    echo "No open PRs found."
+    break
+  fi
+
+  PR_LIST=$(echo "$ALL_PRS" | jq -rs '
+    sort_by(.createdAt) | reverse | .[] |
+    "\(.repo)\t#\(.number)\t" +
+    (if .isDraft then "DRAFT " else "READY " end) + "\t" +
+    (if .reviewDecision == "APPROVED" then "✔️  "
+     elif .reviewDecision == "CHANGES_REQUESTED" then "❌  "
+     else "⏳  " end) + "\t" +
+    (if .mergeable == "MERGEABLE" then "MERGEABLE"
+     elif .mergeable == "CONFLICTING" then "CONFLICT "
+     else "UNKNOWN  " end) + "\t@" +
+    .author.login + "\t" +
+    .title
+  ')
+
+  echo
+  echo "Select PRs to review (across all repos)"
+  echo "TAB = select | ENTER = review | ESC = skip all"
+  echo
+
+  SELECTED=$(echo "$PR_LIST" | fzf \
+    --multi \
+    --ansi \
+    --prompt="PRs > " \
+    --header="repo | # | READY | review | merge | author | title")
+
+  FZF_EXIT=$?
+
+  if [[ $FZF_EXIT -ne 0 || -z "$SELECTED" ]]; then
+    echo "⏭️  No PRs selected. Exiting."
+    break
+  fi
+
+  # Process selected PRs: show decision menu first, then act (one PR then back to menu)
+  while IFS=$'\t' read -r repo pr status review merge author title; do
+    pr_number="${pr#\#}"
+
+    echo
+    echo "--------------------------------"
+    echo "$repo PR #$pr_number"
+    echo "--------------------------------"
+    echo
+    echo "Decision:"
+    echo "1) Approve"
+    echo "2) Approve and squash"
+    echo "3) Review in web"
+    echo "4) Review in CLI"
+    echo "5) Close PR"
+    echo "6) Back"
+    echo
+
+    read -p "Choose [1-6]: " choice </dev/tty
+
+    case "$choice" in
+      1)
+        gh pr review "$pr_number" --repo "$repo" --approve
+        echo "✅ Approved"
+        break
+        ;;
+      2)
+        gh pr review "$pr_number" --repo "$repo" --approve
+        gh pr merge "$pr_number" --repo "$repo" --squash
+        echo "🚀 Approved and merged"
+        break
+        ;;
+      3)
+        gh pr view "$pr_number" --repo "$repo" --web
+        break
+        ;;
+      4)
+        gh pr view "$pr_number" --repo "$repo" \
+          --json title,author,headRefName,baseRefName \
+          --jq '"Title: \(.title)\nAuthor: \(.author.login)\nBranch: \(.headRefName) → \(.baseRefName)"'
+        echo
+        gh pr diff "$pr_number" --repo "$repo"
+        break
+        ;;
+      5)
+        read -p "Confirm close PR? (y/N): " confirm </dev/tty
+        [[ "$confirm" =~ ^[Yy]$ ]] && gh pr close "$pr_number" --repo "$repo"
+        break
+        ;;
+      6)
+        echo "⏭️  Back to selection menu..."
+        break
+        ;;
+      *)
+        echo "Invalid choice, skipped"
+        ;;
+    esac
+  done <<< "$SELECTED"
+
+  # After processing (any action or Back), return to selection menu
+  continue
+done
+
+set -e
+trap - INT
+
+echo
+echo "🎉 Unified PR review finished"
+
