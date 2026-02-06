@@ -53,7 +53,7 @@ while true; do
 
   PR_LIST=$(echo "$ALL_PRS" | jq -rs --arg G "$G" --arg R "$R" --arg X "$X" --arg Z "$Z" '
     sort_by(.createdAt) | reverse | .[] |
-    "\(.repo)\t#\(.number)\t" +
+    "\(.repo | sub("^Dimensiondev/"; ""))\t\(.repo)\t#\(.number)\t" +
     (if .isDraft then $X + "DRAFT" + $Z + " " else $G + "READY" + $Z + " " end) + "\t" +
     (if .reviewDecision == "APPROVED" then "✔️  "
      elif .reviewDecision == "CHANGES_REQUESTED" then "❌  "
@@ -65,8 +65,8 @@ while true; do
     .title
   ')
 
-  # Append operation items so fzf starts with first PR selected
-  REFRESH_LINE=$'⟳ Refresh'
+  # Append operation items so fzf starts with first PR selected (tab-separated like PR lines so --with-nth shows column 1)
+  REFRESH_LINE=$'⟳ Refresh\t\t\t\t\t\t\t\t'
   PR_LIST=$(printf '%s\n%s' "$REFRESH_LINE" "$PR_LIST")
 
   echo
@@ -77,8 +77,11 @@ while true; do
   SELECTED=$(echo "$PR_LIST" | fzf \
     --multi \
     --ansi \
+    --delimiter=$'\t' \
+    --with-nth=1,3,4,5,6,7,8 \
     --prompt="PRs > " \
-    --header="repo | # | READY | review | merge | author | title")
+    --header="repo | # | READY | review | merge | author | title" \
+    )
 
   FZF_EXIT=$?
 
@@ -107,13 +110,13 @@ while true; do
   fi
 
   # Process selected PRs: show decision menu first, then act (one PR then back to menu)
-  while IFS=$'\t' read -r repo pr status review merge author title; do
-    [[ -z "$repo" ]] && continue
+  while IFS=$'\t' read -r repo_display repo_full pr status review merge author title; do
+    [[ -z "$repo_full" ]] && continue
     pr_number="${pr#\#}"
 
     echo
     echo "--------------------------------"
-    echo "$repo PR #$pr_number"
+    echo "$repo_display PR #$pr_number"
     echo "--------------------------------"
     echo
     echo "Decision (arrows to select, Enter to confirm):"
@@ -130,31 +133,31 @@ while true; do
 
     case "$choice" in
       1)
-        gh pr review "$pr_number" --repo "$repo" --approve
+        gh pr review "$pr_number" --repo "$repo_full" --approve
         echo "✅ Approved"
         break
         ;;
       2)
-        gh pr review "$pr_number" --repo "$repo" --approve
-        gh pr merge "$pr_number" --repo "$repo" --squash
+        gh pr review "$pr_number" --repo "$repo_full" --approve
+        gh pr merge "$pr_number" --repo "$repo_full" --squash
         echo "🚀 Approved and merged"
         break
         ;;
       3)
-        gh pr view "$pr_number" --repo "$repo" --web
+        gh pr view "$pr_number" --repo "$repo_full" --web
         break
         ;;
       4)
-        gh pr view "$pr_number" --repo "$repo" \
+        gh pr view "$pr_number" --repo "$repo_full" \
           --json title,author,headRefName,baseRefName \
           --jq '"Title: \(.title)\nAuthor: \(.author.login)\nBranch: \(.headRefName) → \(.baseRefName)"'
         echo
-        gh pr diff "$pr_number" --repo "$repo"
+        gh pr diff "$pr_number" --repo "$repo_full"
         break
         ;;
       5)
         read -p "Confirm close PR? (y/N): " confirm </dev/tty
-        [[ "$confirm" =~ ^[Yy]$ ]] && gh pr close "$pr_number" --repo "$repo"
+        [[ "$confirm" =~ ^[Yy]$ ]] && gh pr close "$pr_number" --repo "$repo_full"
         break
         ;;
       6)
